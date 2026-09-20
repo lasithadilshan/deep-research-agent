@@ -1,6 +1,5 @@
 """Evidence extractor agent extracting atomic grounded claims from sources."""
 
-import uuid
 from typing import Any
 
 from pydantic import BaseModel, Field
@@ -117,7 +116,8 @@ class ExtractorAgent(BaseAgent):
                         )
                         continue
 
-                    ev_id = f"EV-{uuid.uuid4().hex[:6]}"
+                    ev_idx = len(state.evidence_pool) + 1
+                    ev_id = f"EV-{ev_idx:03d}"
                     # Map to first matching sub-question or general
                     target_sub_q = sub_questions[0].question_id if sub_questions else "SQ-1"
 

@@ -96,8 +96,7 @@ class MockLLMProvider(BaseLLMProvider):
                 )
             result = item
         else:
-            # Construct default instance if possible
-            result = response_model.model_validate({})
+            result = self._generate_synthetic_structured(response_model, prompt)
 
         prompt_tokens = self.count_tokens(prompt)
         completion_tokens = 50
@@ -116,3 +115,65 @@ class MockLLMProvider(BaseLLMProvider):
         # Mock pricing: $0.15 / 1M prompt, $0.60 / 1M completion
         cost = (prompt_tokens * 0.15 / 1_000_000) + (completion_tokens * 0.60 / 1_000_000)
         return round(cost, 6)
+
+    def _generate_synthetic_structured(self, model_cls: type[T], prompt: str) -> T:
+        """Construct synthetic valid instances for common research schemas."""
+        name = model_cls.__name__
+
+        if name == "GeneratedResearchPlan":
+            from deep_research.agents.planner import GeneratedResearchPlan, GeneratedSubQuestion
+
+            return GeneratedResearchPlan(  # type: ignore[return-value]
+                primary_objective="Autonomous Scientific Investigation",
+                hypotheses=["The investigated topic exhibits strong empirical viability."],
+                sub_questions=[
+                    GeneratedSubQuestion(
+                        question_id="SQ-1",
+                        question="What are the foundational metrics and latest developments?",
+                        rationale="Establish baseline metrics",
+                        target_queries=["research topic state of the art"],
+                    )
+                ],
+                initial_search_queries=["research topic state of the art"],
+            )
+
+        if name == "ExtractedEvidenceBatch":
+            from deep_research.agents.extractor import ExtractedEvidenceBatch, RawExtractedClaim
+            from deep_research.models.evidence import ConfidenceLevel
+
+            # Look for lines in prompt to use as quote
+            quote = "findings regarding"
+            if "findings regarding" not in prompt:
+                # Pick any short word sequence from prompt
+                words = prompt.split()
+                quote = " ".join(words[5:10]) if len(words) > 10 else "research"
+
+            return ExtractedEvidenceBatch(  # type: ignore[return-value]
+                claims=[
+                    RawExtractedClaim(
+                        claim="Synthesized finding from retrieved evidence.",
+                        exact_quote=quote,
+                        confidence=ConfidenceLevel.HIGH,
+                    )
+                ]
+            )
+
+        if name == "DraftReportPayload":
+            from deep_research.agents.synthesizer import DraftReportPayload, DraftSection
+
+            return DraftReportPayload(  # type: ignore[return-value]
+                title="Synthesized Investigation Report",
+                executive_summary="Empirical evidence validates the primary hypothesis [EV-001].",
+                sections=[
+                    DraftSection(
+                        title="Empirical Findings",
+                        content="Detailed investigation results substantiate the conclusions [EV-001].",
+                    )
+                ],
+                known_limitations=["Experimental scope restricted to laboratory benchmarks."],
+            )
+
+        try:
+            return model_cls.model_validate({})
+        except Exception:
+            return model_cls.model_construct()

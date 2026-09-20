@@ -56,6 +56,7 @@ class SynthesizerAgent(BaseAgent):
 
     def __init__(self, llm: BaseLLMProvider) -> None:
         super().__init__(agent_name="SynthesizerAgent", llm=llm)
+        self.last_draft: DraftReportPayload | None = None
 
     async def run(self, state: ResearchState, **kwargs: Any) -> StepResult:
         if not self.llm:
@@ -106,7 +107,7 @@ class SynthesizerAgent(BaseAgent):
             cost_usd=usage.cost_usd,
         )
 
-        # Store draft temporarily in state audit for auditor
+        self.last_draft = draft
         summary = (
             f"Drafted report '{draft.title}' with {len(draft.sections)} sections "
             f"using {len(evidence_entries)} evidence pieces"
