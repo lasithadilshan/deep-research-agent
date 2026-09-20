@@ -1,8 +1,8 @@
 # AI Deep Research Agent
 
-[![CI Status](https://github.com/your-org/deep-research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/deep-research-agent/actions/workflows/ci.yml)
+[![CI Status](https://github.com/lasithadilshan/deep-research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/lasithadilshan/deep-research-agent/actions/workflows/ci.yml)
 [![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
-[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE)
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type Checking: mypy strict](https://img.shields.io/badge/type%20checking-mypy%20strict-blue.svg)](https://mypy.readthedocs.io/)
 [![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)]()
@@ -29,7 +29,7 @@ graph TD
     Analyst -->|Unresolved Gaps & Conflicts| Search
     Analyst -->|Findings & Resolved Claims| Synthesizer[SynthesizerAgent]
     Synthesizer -->|Draft with EV-xxx Tokens| Auditor[CitationAuditorAgent]
-    Auditor -->|Renumbered [N] References & Stripped Hallucinations| Report([Cited Research Report])
+    Auditor -->|"Renumbered [N] References & Stripped Hallucinations"| Report([Cited Research Report])
 ```
 
 ---
@@ -62,7 +62,7 @@ graph TD
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-org/deep-research-agent.git
+git clone https://github.com/lasithadilshan/deep-research-agent.git
 cd deep-research-agent
 
 # Set up virtual environment using uv or python -m venv
@@ -82,11 +82,11 @@ cp .env.example .env
 ```
 
 ```env
-# Primary LLM
+# Primary LLM (Google Gemini 3.8 Flash)
 GEMINI_API_KEY="AIzaSyYourGeminiApiKeyHere"
 GEMINI_MODEL="gemini-3.8-flash"
 
-# Search Provider
+# Search Provider (Tavily or DuckDuckGo)
 DEFAULT_SEARCH_PROVIDER="tavily"
 TAVILY_API_KEY="tvly-YourTavilyKeyHere"
 
@@ -102,21 +102,23 @@ CACHE_EXPIRATION_HOURS=72
 
 ### Command Line Interface
 
-Run an interactive research session:
+Run an interactive research session directly:
 
 ```bash
-# Standard research session
+# Standard research session (2 iterations, balanced depth)
 deep-research run "What is the certified efficiency of perovskite-silicon tandem solar cells?"
 
 # Quick mode (single fast iteration)
 deep-research run "Latest breakthroughs in room temperature superconductors" --mode quick
 
-# Deep multi-turn investigation exported to Markdown
+# Deep multi-turn investigation exported to Markdown file
 deep-research run "Solid-state battery commercial readiness and manufacturing bottlenecks" \
   --mode deep \
   --output ./battery_report.md \
   --budget 0.50
 ```
+
+> **Note**: Both `deep-research run "query"` and `deep-research "query"` are fully supported.
 
 ### Python API
 
@@ -140,6 +142,10 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
+Check out runnable scripts in the [`examples/`](examples/) directory:
+- [`examples/quickstart_cli.py`](examples/quickstart_cli.py) — Minimal programmatic research run
+- [`examples/custom_provider_example.py`](examples/custom_provider_example.py) — Registering a custom in-house search provider
+
 ---
 
 ## Extensibility
@@ -153,24 +159,38 @@ from deep_research.providers.search.factory import register_search_provider
 
 @register_search_provider("custom_engine")
 class CustomSearchProvider(BaseSearchProvider):
-    async def search(self, query: str, max_results: int = 10, **kwargs) -> SearchResponse:
+    async def search(self, query: str, max_results: int = 10, **kwargs: object) -> SearchResponse:
         # Perform query against custom index or internal API
         return SearchResponse(query=query, results=[...], provider_name="custom_engine")
+
+    def supports_direct_content(self) -> bool:
+        return False
 ```
 
 ### Adding a Custom LLM Provider
 
 ```python
+from typing import TypeVar
+from pydantic import BaseModel
+from deep_research.models.cost import TokenUsage
 from deep_research.providers.llm.base import BaseLLMProvider
 from deep_research.providers.llm.factory import register_llm_provider
 
+T = TypeVar("T", bound=BaseModel)
+
 @register_llm_provider("custom_llm")
 class CustomLLMProvider(BaseLLMProvider):
-    async def generate_text(self, prompt: str, **kwargs):
+    async def generate_text(self, prompt: str, **kwargs: object) -> tuple[str, TokenUsage]:
         ...
 
-    async def generate_structured(self, prompt: str, response_model: type, **kwargs):
+    async def generate_structured(self, prompt: str, response_model: type[T], **kwargs: object) -> tuple[T, TokenUsage]:
         ...
+
+    def count_tokens(self, text: str) -> int:
+        return len(text) // 4
+
+    def calculate_cost(self, prompt_tokens: int, completion_tokens: int) -> float:
+        return 0.0
 ```
 
 ---
@@ -180,19 +200,25 @@ class CustomLLMProvider(BaseLLMProvider):
 The codebase enforces strict type safety and high test coverage:
 
 ```bash
-# Run 100% offline test suite (99+ unit and integration tests)
-pytest --cov=deep_research --cov-report=term-missing
+# Run all verification checks at once
+make check
 
-# Strict Mypy type-checking
-mypy --strict src tests
-
-# Ruff linting and formatting
-ruff check src tests
-ruff format --check src tests
+# Or individual developer commands:
+make test       # Run 99+ unit and integration tests offline
+make coverage   # Run tests with terminal coverage report (91%+)
+make lint       # Run ruff linter
+make format     # Format code with ruff
+make typecheck  # Run strict mypy type check
 ```
+
+---
+
+## Contributing
+
+We welcome community contributions! Please review [`CONTRIBUTING.md`](CONTRIBUTING.md) for code style guidelines, pull request protocols, and development workflows.
 
 ---
 
 ## License
 
-Distributed under the **Apache 2.0 License**. See [LICENSE](LICENSE) for details.
+Distributed under the **Apache 2.0 License**. See [`LICENSE`](LICENSE) for details.

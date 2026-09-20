@@ -142,5 +142,14 @@ def main(
         console.print(f"\n[bold green]Report successfully written to:[/] {output}")
 
 
-if __name__ == "__main__":
+def run_cli() -> None:
+    """CLI entry point supporting both 'deep-research query' and 'deep-research run query'."""
+    import sys
+
+    if len(sys.argv) > 1 and sys.argv[1] == "run":
+        sys.argv.pop(1)
     app()
+
+
+if __name__ == "__main__":
+    run_cli()

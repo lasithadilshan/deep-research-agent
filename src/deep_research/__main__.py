@@ -1,6 +1,4 @@
-"""Entry point for python -m deep_research execution."""
-
-from deep_research.cli import app
+from deep_research.cli import run_cli
 
 if __name__ == "__main__":
-    app()
+    run_cli()

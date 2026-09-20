@@ -56,7 +56,7 @@ dev = [
 ]
 
 [project.scripts]
-deep-research = "deep_research.cli:app"
+deep-research = "deep_research.cli:run_cli"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/deep_research"]
