@@ -15,7 +15,7 @@ T = TypeVar("T", bound=BaseModel)
 class MockLLMProvider(BaseLLMProvider):
     """Mock LLM provider delivering pre-queued responses or deterministic outputs."""
 
-    def __init__(self, model_name: str = "mock-model") -> None:
+    def __init__(self, model_name: str = "mock-model", **kwargs: Any) -> None:
         super().__init__(model_name=model_name)
         self.text_queue: list[str] = []
         self.structured_queue: list[BaseModel] = []

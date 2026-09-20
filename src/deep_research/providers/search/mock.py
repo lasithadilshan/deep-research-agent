@@ -12,7 +12,7 @@ from deep_research.providers.search.factory import register_search_provider
 class MockSearchProvider(BaseSearchProvider):
     """Mock search engine returning pre-canned or synthetic results."""
 
-    def __init__(self, provider_name: str = "mock") -> None:
+    def __init__(self, provider_name: str = "mock", **kwargs: Any) -> None:
         super().__init__(provider_name=provider_name)
         self.response_queue: list[SearchResponse] = []
         self.error_queue: list[Exception] = []
