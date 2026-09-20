@@ -9,6 +9,8 @@
 
 > A production-grade, extensible autonomous AI research agent system powered by **Google Gemini 3.8 Flash**, featuring strict verbatim quote grounding, automated citation audits (`[N]`), dual-provider abstractions, and circuit-breaker cost controls.
 
+📖 **Architecture & Implementation Plan**: For the comprehensive system architecture, formal Pydantic data schemas, state progression diagrams, and milestone roadmap, see [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md).
+
 ---
 
 ## Architectural Blueprint
