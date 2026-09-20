@@ -19,6 +19,10 @@ class RawExtractedClaim(BaseModel):
     exact_quote: str = Field(
         description="Verbatim uninterrupted quote from text supporting claim exactly"
     )
+    sub_question_id: str = Field(
+        default="",
+        description="ID of the sub-question addressed, e.g. SQ-1 or SQ-2",
+    )
     confidence: ConfidenceLevel = Field(
         default=ConfidenceLevel.MEDIUM,
         description="Assessed confidence based on strength of source statement",
@@ -69,8 +73,12 @@ class ExtractorAgent(BaseAgent):
 
         extracted_count = 0
         rejected_hallucinations = 0
+        extracted_source_ids = {ev.source_id for ev in state.evidence_pool.values()}
 
         for source_id, source in state.sources.items():
+            if source_id in extracted_source_ids:
+                continue
+
             if state.budget.is_exceeded:
                 state.record_audit("Extractor stopped early: budget ceiling exceeded.")
                 break
@@ -118,8 +126,18 @@ class ExtractorAgent(BaseAgent):
 
                     ev_idx = len(state.evidence_pool) + 1
                     ev_id = f"EV-{ev_idx:03d}"
-                    # Map to first matching sub-question or general
-                    target_sub_q = sub_questions[0].question_id if sub_questions else "SQ-1"
+                    # Map to explicit sub-question, or first unanswered sub-question, or fallback to SQ-1
+                    valid_sq_ids = {sq.question_id for sq in sub_questions}
+                    if raw_claim.sub_question_id in valid_sq_ids:
+                        target_sub_q = raw_claim.sub_question_id
+                    else:
+                        unanswered = [sq for sq in sub_questions if not sq.evidence_ids]
+                        if unanswered:
+                            target_sub_q = unanswered[0].question_id
+                        elif sub_questions:
+                            target_sub_q = sub_questions[0].question_id
+                        else:
+                            target_sub_q = "SQ-1"
 
                     evidence = Evidence(
                         evidence_id=ev_id,

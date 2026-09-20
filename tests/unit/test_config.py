@@ -106,6 +106,6 @@ class TestLoggingConfiguration:
             "api_key": "AIzaSySecretKey12345678901234567890",
             "normal_field": "public_data",
         }
-        res = secret_masking_processor(None, "info", event_dict)  # type: ignore[arg-type]
+        res = secret_masking_processor(None, "info", event_dict)
         assert "[REDACTED]" in str(res["api_key"])
         assert res["normal_field"] == "public_data"

@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from deep_research.agents.analyst import AnalystAgent
 from deep_research.agents.auditor import CitationAuditorAgent
 from deep_research.agents.evaluator import EvaluatorAgent
 from deep_research.agents.extractor import ExtractorAgent
@@ -12,7 +13,7 @@ from deep_research.config.settings import Settings, get_settings
 from deep_research.core.exceptions import ConfigurationError
 from deep_research.models.cost import BudgetTracker
 from deep_research.models.plan import ResearchMode
-from deep_research.models.source import Source
+from deep_research.models.source import Source, canonicalize_url, generate_source_id
 from deep_research.models.state import ResearchState, ResearchStatus
 from deep_research.providers.llm.base import BaseLLMProvider
 from deep_research.providers.llm.factory import get_llm_provider
@@ -69,6 +70,7 @@ class ResearchOrchestrator:
         self.planner = PlannerAgent(llm=self.llm)
         self.evaluator = EvaluatorAgent()
         self.extractor = ExtractorAgent(llm=self.llm)
+        self.analyst = AnalystAgent(llm=self.llm)
         self.synthesizer = SynthesizerAgent(llm=self.llm)
         self.auditor = CitationAuditorAgent()
 
@@ -109,28 +111,99 @@ class ResearchOrchestrator:
             status_callback("Planning research strategy and sub-questions...")
         await self.planner.execute(state)
 
-        # 2. Search & Retrieval Phase
-        if status_callback:
-            status_callback("Searching web sources...")
-        await self._discover_and_ingest_sources(state, status_callback=status_callback)
+        # Multi-Iteration Deep Research Loop
+        queries_to_search: list[str] = (
+            state.plan.initial_search_queries if state.plan else [state.initial_query]
+        )
+        searched_queries: set[str] = set()
 
-        # 3. Source Quality & Credibility Evaluation
-        if status_callback:
-            status_callback("Evaluating source credibility and filtering content...")
-        await self.evaluator.execute(state)
+        for iteration in range(1, state.max_iterations + 1):
+            state.current_iteration = iteration
 
-        # 4. Atomic Grounded Evidence Extraction
-        if status_callback:
-            status_callback("Extracting atomic factual evidence with quote grounding...")
-        await self.extractor.execute(state)
+            # Deduplicate search queries
+            current_queries = [q for q in queries_to_search if q not in searched_queries]
+            if not current_queries and iteration > 1:
+                state.record_audit(
+                    f"Iteration {iteration}: No new queries to execute; ending deep loop."
+                )
+                break
 
-        # 5. Report Synthesis
+            for q in current_queries:
+                searched_queries.add(q)
+
+            # 2. Search & Retrieval Phase
+            if status_callback:
+                status_callback(
+                    f"Iteration {iteration}/{state.max_iterations}: Searching web sources..."
+                )
+            await self._discover_and_ingest_sources(
+                state, queries=current_queries, status_callback=status_callback
+            )
+
+            # 3. Source Quality & Credibility Evaluation
+            if status_callback:
+                status_callback(
+                    f"Iteration {iteration}/{state.max_iterations}: Evaluating source credibility..."
+                )
+            await self.evaluator.execute(state)
+
+            # 4. Atomic Grounded Evidence Extraction
+            if status_callback:
+                status_callback(
+                    f"Iteration {iteration}/{state.max_iterations}: Extracting atomic factual evidence..."
+                )
+            await self.extractor.execute(state)
+
+            # 5. Cross-Evidence Analysis & Gap Detection (for multi-iteration runs)
+            if state.max_iterations > 1:
+                if status_callback:
+                    status_callback(
+                        f"Iteration {iteration}/{state.max_iterations}: Analyzing evidence density & gaps..."
+                    )
+                await self.analyst.execute(state)
+
+                # Check termination conditions:
+                if state.budget.is_exceeded:
+                    state.record_audit("Deep iteration stopped: budget ceiling exceeded.")
+                    break
+
+                if iteration >= state.max_iterations:
+                    break
+
+                sub_questions = state.plan.sub_questions if state.plan else []
+                all_answered = bool(sub_questions) and all(sq.is_answered for sq in sub_questions)
+
+                follow_ups: list[str] = []
+                if self.analyst.last_analysis:
+                    follow_ups.extend(self.analyst.last_analysis.suggested_follow_up_queries)
+                    for conflict in self.analyst.last_analysis.conflicts:
+                        if (
+                            conflict.resolution_query
+                            and conflict.resolution_query not in follow_ups
+                        ):
+                            follow_ups.append(conflict.resolution_query)
+
+                if all_answered and not follow_ups:
+                    state.record_audit(
+                        "Early termination: all sub-questions satisfied with high confidence."
+                    )
+                    break
+
+                if not follow_ups:
+                    state.record_audit(
+                        "Iteration completed: no further follow-up queries proposed."
+                    )
+                    break
+
+                queries_to_search = follow_ups
+
+        # 6. Report Synthesis
         if status_callback:
             status_callback("Synthesizing multi-section scientific report...")
         await self.synthesizer.execute(state)
         draft = self.synthesizer.last_draft
 
-        # 6. Citation Audit & Anti-Hallucination Barrier
+        # 7. Citation Audit & Anti-Hallucination Barrier
         if status_callback:
             status_callback("Auditing citations and compiling bibliography...")
         await self.auditor.execute(state, draft_report=draft)
@@ -146,15 +219,20 @@ class ResearchOrchestrator:
         return state
 
     async def _discover_and_ingest_sources(
-        self, state: ResearchState, status_callback: Any = None
+        self,
+        state: ResearchState,
+        queries: list[str] | None = None,
+        status_callback: Any = None,
     ) -> None:
         """Execute queries and ingest web page content into state.sources."""
         state.transition_to(ResearchStatus.SEARCHING, "Executing web searches")
-        queries = state.plan.initial_search_queries if state.plan else [state.initial_query]
+        raw_queries = queries or (
+            state.plan.initial_search_queries if state.plan else [state.initial_query]
+        )
 
-        # Limit initial queries based on settings
-        max_q = min(len(queries), self.settings.max_search_queries_per_iteration)
-        target_queries = queries[:max_q]
+        # Limit queries based on settings
+        max_q = min(len(raw_queries), self.settings.max_search_queries_per_iteration)
+        target_queries = raw_queries[:max_q]
 
         for query_str in target_queries:
             if state.budget.is_exceeded:
@@ -171,6 +249,12 @@ class ResearchOrchestrator:
                 )
 
                 for hit in search_response.results:
+                    # Skip hit if source is already ingested
+                    canon_url = canonicalize_url(hit.url)
+                    src_id = generate_source_id(canon_url)
+                    if src_id in state.sources:
+                        continue
+
                     # Ingest source
                     cleaned_markdown = hit.direct_markdown or ""
 

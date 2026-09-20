@@ -173,6 +173,15 @@ class MockLLMProvider(BaseLLMProvider):
                 known_limitations=["Experimental scope restricted to laboratory benchmarks."],
             )
 
+        if name == "GapAnalysisOutput":
+            from deep_research.agents.analyst import GapAnalysisOutput
+
+            return GapAnalysisOutput(  # type: ignore[return-value]
+                unresolved_questions=[],
+                conflicts=[],
+                suggested_follow_up_queries=[],
+            )
+
         try:
             return model_cls.model_validate({})
         except Exception:

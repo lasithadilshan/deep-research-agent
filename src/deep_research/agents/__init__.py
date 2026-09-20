@@ -1,5 +1,10 @@
 """Agent modules exports."""
 
+from deep_research.agents.analyst import (
+    AnalystAgent,
+    GapAnalysisOutput,
+    IdentifiedConflict,
+)
 from deep_research.agents.auditor import CitationAuditorAgent
 from deep_research.agents.base import BaseAgent
 from deep_research.agents.evaluator import EvaluatorAgent
@@ -12,12 +17,15 @@ from deep_research.agents.synthesizer import (
 )
 
 __all__ = [
+    "AnalystAgent",
     "BaseAgent",
     "CitationAuditorAgent",
     "DraftReportPayload",
     "DraftSection",
     "EvaluatorAgent",
     "ExtractorAgent",
+    "GapAnalysisOutput",
+    "IdentifiedConflict",
     "PlannerAgent",
     "SynthesizerAgent",
 ]
