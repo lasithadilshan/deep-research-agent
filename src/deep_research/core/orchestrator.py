@@ -13,12 +13,14 @@ from deep_research.config.settings import Settings, get_settings
 from deep_research.core.exceptions import ConfigurationError
 from deep_research.models.cost import BudgetTracker
 from deep_research.models.plan import ResearchMode
+from deep_research.models.search import SearchResponse
 from deep_research.models.source import Source, canonicalize_url, generate_source_id
 from deep_research.models.state import ResearchState, ResearchStatus
 from deep_research.providers.llm.base import BaseLLMProvider
 from deep_research.providers.llm.factory import get_llm_provider
 from deep_research.providers.search.base import BaseSearchProvider
 from deep_research.providers.search.factory import get_search_provider
+from deep_research.storage.cache import ResearchCache
 from deep_research.tools.content_cleaner import clean_html_to_markdown
 from deep_research.tools.web_fetcher import WebFetcher
 
@@ -31,9 +33,22 @@ class ResearchOrchestrator:
         llm: BaseLLMProvider | None = None,
         search_provider: BaseSearchProvider | None = None,
         settings: Settings | None = None,
+        cache: ResearchCache | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.logger = get_logger("ResearchOrchestrator")
+
+        # Resolve Cache layer
+        if cache is not None:
+            self.cache: ResearchCache | None = cache
+        elif self.settings.cache_enabled:
+            cache_db = self.settings.cache_dir / "cache.db"
+            self.cache = ResearchCache(
+                db_path=cache_db,
+                default_ttl_hours=float(self.settings.cache_expiration_hours),
+            )
+        else:
+            self.cache = None
 
         # Resolve LLM provider
         if llm:
@@ -64,7 +79,7 @@ class ResearchOrchestrator:
                 )
                 self.search_provider = get_search_provider("duckduckgo")
 
-        self.web_fetcher = WebFetcher()
+        self.web_fetcher = WebFetcher(cache=self.cache)
 
         # Initialize agents
         self.planner = PlannerAgent(llm=self.llm)
@@ -240,13 +255,31 @@ class ResearchOrchestrator:
                 break
 
             try:
-                search_response = await self.search_provider.search(
-                    query=query_str,
-                    max_results=self.settings.max_sources_per_query,
-                )
-                state.budget.record_search_call(
-                    cost_usd=0.01 if self.search_provider.provider_name == "tavily" else 0.0
-                )
+                search_response: SearchResponse | None = None
+                if self.cache:
+                    search_response = self.cache.get_search(
+                        provider=self.search_provider.provider_name,
+                        query=query_str,
+                        max_results=self.settings.max_sources_per_query,
+                    )
+                    if search_response:
+                        state.record_audit(f"Retrieved cached search results for '{query_str}'")
+
+                if not search_response:
+                    search_response = await self.search_provider.search(
+                        query=query_str,
+                        max_results=self.settings.max_sources_per_query,
+                    )
+                    state.budget.record_search_call(
+                        cost_usd=0.01 if self.search_provider.provider_name == "tavily" else 0.0
+                    )
+                    if self.cache:
+                        self.cache.set_search(
+                            provider=self.search_provider.provider_name,
+                            query=query_str,
+                            max_results=self.settings.max_sources_per_query,
+                            response=search_response,
+                        )
 
                 for hit in search_response.results:
                     # Skip hit if source is already ingested

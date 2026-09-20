@@ -2,11 +2,15 @@
 
 import ipaddress
 import socket
+from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
 
 from deep_research.core.exceptions import WebFetchError
+
+if TYPE_CHECKING:
+    from deep_research.storage.cache import ResearchCache
 
 DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
 DEFAULT_TIMEOUT = 15.0
@@ -54,8 +58,13 @@ def validate_url_and_check_ssrf(url: str) -> None:
 class WebFetcher:
     """Async web fetcher enforcing safety boundaries and content size limits."""
 
-    def __init__(self, client: httpx.AsyncClient | None = None) -> None:
+    def __init__(
+        self,
+        client: httpx.AsyncClient | None = None,
+        cache: "ResearchCache | None" = None,
+    ) -> None:
         self._client = client
+        self.cache = cache
 
     async def fetch(
         self,
@@ -65,6 +74,11 @@ class WebFetcher:
         validate_ssrf: bool = True,
     ) -> str:
         """Safely fetch web page content as string up to max_bytes."""
+        if self.cache:
+            cached = self.cache.get_web(url)
+            if cached is not None:
+                return cached
+
         if validate_ssrf:
             validate_url_and_check_ssrf(url)
 
@@ -72,10 +86,14 @@ class WebFetcher:
 
         try:
             if self._client:
-                return await self._download(self._client, url, headers, timeout, max_bytes)
+                content = await self._download(self._client, url, headers, timeout, max_bytes)
             else:
                 async with httpx.AsyncClient(follow_redirects=True) as client:
-                    return await self._download(client, url, headers, timeout, max_bytes)
+                    content = await self._download(client, url, headers, timeout, max_bytes)
+
+            if self.cache:
+                self.cache.set_web(url, content)
+            return content
 
         except httpx.HTTPStatusError as e:
             raise WebFetchError(f"HTTP {e.response.status_code} error fetching {url}") from e

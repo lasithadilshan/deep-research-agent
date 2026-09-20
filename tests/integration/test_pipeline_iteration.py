@@ -178,3 +178,54 @@ async def test_multi_turn_deep_iteration_loop() -> None:
     urls = [b.url for b in state.final_report.bibliography]
     assert any("solidpowerbattery" in u for u in urls)
     assert any("battery-manufacturing" in u for u in urls)
+
+
+@pytest.mark.asyncio
+async def test_orchestrator_search_caching() -> None:
+    from deep_research.storage.cache import ResearchCache
+
+    cache = ResearchCache(db_path=":memory:")
+    mock_llm = MockLLMProvider()
+    mock_search = MockSearchProvider()
+
+    # Pre-seed cache with search hit
+    cached_hit = SearchResult(
+        title="Quantum Dot Quantum Yield",
+        url="https://nanotech.example.com/qd",
+        snippet="Perovskite quantum dots exceed 95% photoluminescence quantum yield in blue emission.",
+        direct_markdown=(
+            "Perovskite quantum dots exceed 95% photoluminescence quantum yield in blue emission under laboratory "
+            "optical excitation tests, setting a new benchmark for narrow-band electroluminescent display applications."
+        ),
+    )
+    cached_resp = SearchResponse(
+        query="research topic state of the art",
+        results=[cached_hit],
+        provider_name="mock",
+    )
+    cache.set_search(
+        provider="mock",
+        query="research topic state of the art",
+        max_results=6,
+        response=cached_resp,
+    )
+
+    # Note: mock_search has NO queued responses. If it were called, it would generate synthetic papers.
+    # Because it is cached, it retrieves cached_hit!
+    orchestrator = ResearchOrchestrator(
+        llm=mock_llm,
+        search_provider=mock_search,
+        cache=cache,
+    )
+
+    state = await orchestrator.execute_research(
+        query="quantum dots display efficiency",
+        mode=ResearchMode.QUICK,
+    )
+
+    assert state.status == ResearchStatus.COMPLETED
+    assert any("Retrieved cached search results" in log for log in state.audit_log)
+    assert "src-d4924c87e8" in state.sources or any(
+        "nanotech.example.com" in s.url for s in state.sources.values()
+    )
+    cache.close()
