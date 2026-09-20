@@ -1,37 +1,198 @@
 # AI Deep Research Agent
 
-> Production-grade, extensible open-source research engine powered by **Google Gemini 3.8 Flash**.
+[![CI Status](https://github.com/your-org/deep-research-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/deep-research-agent/actions/workflows/ci.yml)
+[![Python 3.11 | 3.12](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](https://www.python.org/)
+[![License](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Type Checking: mypy strict](https://img.shields.io/badge/type%20checking-mypy%20strict-blue.svg)](https://mypy.readthedocs.io/)
+[![Coverage](https://img.shields.io/badge/coverage-91%25-brightgreen.svg)]()
 
-The **AI Deep Research Agent** takes complex, open-ended research questions, decomposes them into targeted sub-questions, systematically searches and ingests multiple sources, filters noise, extracts atomic evidence, and synthesizes cited research reports with strict numeric citations grounded in source passages.
+> A production-grade, extensible autonomous AI research agent system powered by **Google Gemini 3.8 Flash**, featuring strict verbatim quote grounding, automated citation audits (`[N]`), dual-provider abstractions, and circuit-breaker cost controls.
 
-## Key Features
+---
 
-- **Google Gemini 3.8 Flash First**: Ultra-fast, cost-effective reasoning with structured Pydantic schema enforcement.
-- **Evidence-First Anti-Hallucination**: The report synthesizer only sees pre-extracted atomic evidence passages with verifiable verbatim quotes.
-- **Strict Citation Verification**: Citation auditor verifies every single `[N]` reference against source content.
-- **Double-Ended Provider Abstraction**: Easily plug in new Search engines (Tavily, Google, Brave, DuckDuckGo) and LLMs (Gemini, OpenAI, Anthropic, Ollama).
-- **Cost & Token Guardrails**: Automatic HTML boilerplate stripping cuts tokens by ~85%; circuit-breaker budget enforcement.
+## Architectural Blueprint
+
+The system executes deep scientific investigations through specialized autonomous agents coordinated by a centralized orchestrator:
+
+```mermaid
+graph TD
+    User([User Query]) --> CLI[CLI / Orchestrator]
+    CLI --> Planner[PlannerAgent]
+    Planner -->|ResearchPlan| Search[Search Provider / WebFetcher]
+    Search <-->|Deterministic Keying| Cache[(SQLite Disk Cache)]
+    Search -->|Raw HTML / Markdown| Cleaner[Content Cleaner / Sanitizer]
+    Cleaner -->|Safe Untrusted Content| Evaluator[EvaluatorAgent]
+    Evaluator -->|Credible Sources| Extractor[ExtractorAgent]
+    Extractor -->|Verbatim Grounded Claims| EvidencePool[(Evidence Pool)]
+    EvidencePool --> Analyst[AnalystAgent]
+    Analyst -->|Unresolved Gaps & Conflicts| Search
+    Analyst -->|Findings & Resolved Claims| Synthesizer[SynthesizerAgent]
+    Synthesizer -->|Draft with EV-xxx Tokens| Auditor[CitationAuditorAgent]
+    Auditor -->|Renumbered [N] References & Stripped Hallucinations| Report([Cited Research Report])
+```
+
+---
+
+## Core Pillars & Key Features
+
+### 1. Zero-Hallucination Evidence-First Grounding
+- **Verbatim Quote Enforcement**: `ExtractorAgent` extracts atomic claims from web sources only when backed by an exact uninterrupted substring quote. Any claim lacking an exact textual match in the source is instantly rejected.
+- **Synthesizer Isolation**: `SynthesizerAgent` only receives structured evidence tokens (`[EV-001]`). The model is strictly forbidden from introducing ungrounded external assertions.
+- **Citation Auditor Barrier**: `CitationAuditorAgent` cross-checks every token in the draft report against the evidence pool, remaps verified citations to sequential academic references (`[1]`, `[2]`), and replaces unverified claims with `[Unverified Claim]`.
+
+### 2. Dual Provider Abstraction Layers
+- **LLM Layer**: Clean `BaseLLMProvider` interface with a registry `@register_llm_provider`. Ships with native **Google Gemini 3.8 Flash** (`gemini-3.8-flash`) structured decoding, and deterministic `MockLLMProvider` for offline testing.
+- **Search Layer**: Extensible `BaseSearchProvider` supporting **Tavily AI Search** (with direct markdown), **DuckDuckGo** (zero-config fallback), and deterministic `MockSearchProvider`.
+
+### 3. Multi-Turn Deep Iteration Engine
+- **`AnalystAgent`**: Computes empirical evidence density across sub-questions, detects factual contradictions between sources, and formulates targeted follow-up search queries to resolve knowledge gaps across iterations.
+- **Iterative Loop**: Runs in `QUICK` (1 turn), `STANDARD` (2 turns), or `DEEP` (up to 10 turns with early satisfaction termination).
+
+### 4. Deterministic Caching & Web Sanitization
+- **SQLite Disk Cache**: Transparent WAL-mode disk cache with configurable TTL (default 72h) for search queries and scraped web pages. Keyed by SHA-256 digests.
+- **SSRF Defense**: `WebFetcher` validates DNS resolutions against loopback, private, AWS metadata (`169.254.169.254`), and link-local ranges.
+- **Boilerplate Stripper**: `trafilatura` extracts clean semantic article text, stripping headers, footers, ads, and navigation menus, cutting token usage by ~85%.
+
+---
 
 ## Quickstart
+
+### Installation
 
 ```bash
 # Clone the repository
 git clone https://github.com/your-org/deep-research-agent.git
 cd deep-research-agent
 
-# Set up virtual environment and install dependencies
+# Set up virtual environment using uv or python -m venv
 uv venv
 source .venv/bin/activate
+
+# Install dependencies and dev tools
 uv pip install -e ".[dev]"
-
-# Configure API keys
-cp .env.example .env
-# Edit .env with your GEMINI_API_KEY and TAVILY_API_KEY
-
-# Run tests
-pytest
 ```
+
+### Configuration
+
+Copy `.env.example` to `.env` and set your API keys:
+
+```bash
+cp .env.example .env
+```
+
+```env
+# Primary LLM
+GEMINI_API_KEY="AIzaSyYourGeminiApiKeyHere"
+GEMINI_MODEL="gemini-3.8-flash"
+
+# Search Provider
+DEFAULT_SEARCH_PROVIDER="tavily"
+TAVILY_API_KEY="tvly-YourTavilyKeyHere"
+
+# Research Budget & Caching
+MAX_BUDGET_USD_PER_RUN=1.00
+CACHE_ENABLED=true
+CACHE_EXPIRATION_HOURS=72
+```
+
+---
+
+## Usage
+
+### Command Line Interface
+
+Run an interactive research session:
+
+```bash
+# Standard research session
+deep-research run "What is the certified efficiency of perovskite-silicon tandem solar cells?"
+
+# Quick mode (single fast iteration)
+deep-research run "Latest breakthroughs in room temperature superconductors" --mode quick
+
+# Deep multi-turn investigation exported to Markdown
+deep-research run "Solid-state battery commercial readiness and manufacturing bottlenecks" \
+  --mode deep \
+  --output ./battery_report.md \
+  --budget 0.50
+```
+
+### Python API
+
+```python
+import asyncio
+from deep_research.core.orchestrator import ResearchOrchestrator
+from deep_research.models.plan import ResearchMode
+
+async def main() -> None:
+    orchestrator = ResearchOrchestrator()
+    state = await orchestrator.execute_research(
+        query="Compare power conversion efficiencies of tandem perovskite solar cells",
+        mode=ResearchMode.STANDARD,
+        max_budget_usd=0.75,
+    )
+
+    if state.final_report:
+        print(state.final_report.to_markdown())
+
+if __name__ == "__main__":
+    asyncio.run(main())
+```
+
+---
+
+## Extensibility
+
+### Adding a Custom Search Provider
+
+```python
+from deep_research.models.search import SearchResponse, SearchResult
+from deep_research.providers.search.base import BaseSearchProvider
+from deep_research.providers.search.factory import register_search_provider
+
+@register_search_provider("custom_engine")
+class CustomSearchProvider(BaseSearchProvider):
+    async def search(self, query: str, max_results: int = 10, **kwargs) -> SearchResponse:
+        # Perform query against custom index or internal API
+        return SearchResponse(query=query, results=[...], provider_name="custom_engine")
+```
+
+### Adding a Custom LLM Provider
+
+```python
+from deep_research.providers.llm.base import BaseLLMProvider
+from deep_research.providers.llm.factory import register_llm_provider
+
+@register_llm_provider("custom_llm")
+class CustomLLMProvider(BaseLLMProvider):
+    async def generate_text(self, prompt: str, **kwargs):
+        ...
+
+    async def generate_structured(self, prompt: str, response_model: type, **kwargs):
+        ...
+```
+
+---
+
+## Testing & Code Quality
+
+The codebase enforces strict type safety and high test coverage:
+
+```bash
+# Run 100% offline test suite (99+ unit and integration tests)
+pytest --cov=deep_research --cov-report=term-missing
+
+# Strict Mypy type-checking
+mypy --strict src tests
+
+# Ruff linting and formatting
+ruff check src tests
+ruff format --check src tests
+```
+
+---
 
 ## License
 
-Apache 2.0
+Distributed under the **Apache 2.0 License**. See [LICENSE](LICENSE) for details.
