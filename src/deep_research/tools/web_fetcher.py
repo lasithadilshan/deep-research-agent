@@ -2,22 +2,33 @@
 
 import ipaddress
 import socket
+from dataclasses import dataclass
 from typing import TYPE_CHECKING
 from urllib.parse import urlparse
 
 import httpx
 
 from deep_research.core.exceptions import WebFetchError
+from deep_research.tools.pdf_parser import clean_pdf_to_markdown
 
 if TYPE_CHECKING:
     from deep_research.storage.cache import ResearchCache
 
-DEFAULT_MAX_BYTES = 5 * 1024 * 1024  # 5 MB
+DEFAULT_MAX_BYTES = 10 * 1024 * 1024  # 10 MB (supports larger research PDFs)
 DEFAULT_TIMEOUT = 15.0
 USER_AGENT = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
     "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36 DeepResearch/1.0"
 )
+
+
+@dataclass
+class FetchedDocument:
+    """Document fetched by WebFetcher with content and type classification."""
+
+    content: str
+    is_pdf: bool = False
+    content_type: str = ""
 
 
 def validate_url_and_check_ssrf(url: str) -> None:
@@ -73,27 +84,50 @@ class WebFetcher:
         max_bytes: int = DEFAULT_MAX_BYTES,
         validate_ssrf: bool = True,
     ) -> str:
-        """Safely fetch web page content as string up to max_bytes."""
+        """Safely fetch web page or PDF content as clean string up to max_bytes."""
+        doc = await self.fetch_document(
+            url, timeout=timeout, max_bytes=max_bytes, validate_ssrf=validate_ssrf
+        )
+        return doc.content
+
+    async def fetch_document(
+        self,
+        url: str,
+        timeout: float = DEFAULT_TIMEOUT,
+        max_bytes: int = DEFAULT_MAX_BYTES,
+        validate_ssrf: bool = True,
+    ) -> FetchedDocument:
+        """Safely fetch web page or PDF document with type classification."""
         if self.cache:
             cached = self.cache.get_web(url)
             if cached is not None:
-                return cached
+                is_pdf = url.lower().split("?")[0].endswith(".pdf") or cached.startswith(
+                    "### Page "
+                )
+                return FetchedDocument(
+                    content=cached,
+                    is_pdf=is_pdf,
+                    content_type="application/pdf" if is_pdf else "text/html",
+                )
 
         if validate_ssrf:
             validate_url_and_check_ssrf(url)
 
-        headers = {"User-Agent": USER_AGENT, "Accept": "text/html,application/xhtml+xml,text/plain"}
+        headers = {
+            "User-Agent": USER_AGENT,
+            "Accept": "text/html,application/xhtml+xml,application/pdf,text/plain",
+        }
 
         try:
             if self._client:
-                content = await self._download(self._client, url, headers, timeout, max_bytes)
+                doc = await self._download(self._client, url, headers, timeout, max_bytes)
             else:
                 async with httpx.AsyncClient(follow_redirects=True) as client:
-                    content = await self._download(client, url, headers, timeout, max_bytes)
+                    doc = await self._download(client, url, headers, timeout, max_bytes)
 
             if self.cache:
-                self.cache.set_web(url, content)
-            return content
+                self.cache.set_web(url, doc.content)
+            return doc
 
         except httpx.HTTPStatusError as e:
             raise WebFetchError(f"HTTP {e.response.status_code} error fetching {url}") from e
@@ -109,7 +143,7 @@ class WebFetcher:
         headers: dict[str, str],
         timeout: float,
         max_bytes: int,
-    ) -> str:
+    ) -> FetchedDocument:
         response = await client.get(url, headers=headers, timeout=timeout)
         response.raise_for_status()
 
@@ -117,9 +151,31 @@ class WebFetcher:
         if len(content_bytes) > max_bytes:
             content_bytes = content_bytes[:max_bytes]
 
-        # Decode with fallback encoding
+        headers_obj = getattr(response, "headers", None)
+        content_type = headers_obj.get("content-type", "").lower() if headers_obj else ""
+        is_pdf = (
+            "application/pdf" in content_type
+            or url.lower().split("?")[0].endswith(".pdf")
+            or content_bytes.startswith(b"%PDF")
+        )
+
+        if is_pdf:
+            markdown_text = clean_pdf_to_markdown(content_bytes)
+            return FetchedDocument(
+                content=markdown_text,
+                is_pdf=True,
+                content_type="application/pdf",
+            )
+
+        # Decode standard HTML/text with fallback encoding
         encoding = response.encoding or "utf-8"
         try:
-            return content_bytes.decode(encoding, errors="replace")
+            raw_text = content_bytes.decode(encoding, errors="replace")
         except Exception:
-            return content_bytes.decode("utf-8", errors="replace")
+            raw_text = content_bytes.decode("utf-8", errors="replace")
+
+        return FetchedDocument(
+            content=raw_text,
+            is_pdf=False,
+            content_type=content_type,
+        )

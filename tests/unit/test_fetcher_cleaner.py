@@ -75,6 +75,20 @@ class TestWebFetcher:
         assert len(content) == 100
 
     @pytest.mark.asyncio
+    async def test_fetch_document_pdf_detection(self) -> None:
+        mock_client = AsyncMock(spec=httpx.AsyncClient)
+        mock_resp = MagicMock(spec=httpx.Response)
+        mock_resp.status_code = 200
+        mock_resp.headers = {"content-type": "application/pdf"}
+        mock_resp.content = b"%PDF-1.4 dummy pdf bytes"
+        mock_client.get.return_value = mock_resp
+
+        fetcher = WebFetcher(client=mock_client)
+        doc = await fetcher.fetch_document("https://example.com/paper.pdf", validate_ssrf=False)
+        assert doc.is_pdf is True
+        assert doc.content_type == "application/pdf"
+
+    @pytest.mark.asyncio
     async def test_fetch_404_raises_web_fetch_error(self) -> None:
         mock_client = AsyncMock(spec=httpx.AsyncClient)
         mock_resp = MagicMock(spec=httpx.Response)

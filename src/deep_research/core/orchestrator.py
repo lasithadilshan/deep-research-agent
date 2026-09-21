@@ -14,13 +14,14 @@ from deep_research.core.exceptions import ConfigurationError
 from deep_research.models.cost import BudgetTracker
 from deep_research.models.plan import ResearchMode
 from deep_research.models.search import SearchResponse
-from deep_research.models.source import Source, canonicalize_url, generate_source_id
+from deep_research.models.source import Source, SourceType, canonicalize_url, generate_source_id
 from deep_research.models.state import ResearchState, ResearchStatus
 from deep_research.providers.llm.base import BaseLLMProvider
 from deep_research.providers.llm.factory import get_llm_provider
 from deep_research.providers.search.base import BaseSearchProvider
 from deep_research.providers.search.factory import get_search_provider
 from deep_research.storage.cache import ResearchCache
+from deep_research.storage.session_store import SessionStore
 from deep_research.tools.content_cleaner import clean_html_to_markdown
 from deep_research.tools.web_fetcher import WebFetcher
 
@@ -34,9 +35,13 @@ class ResearchOrchestrator:
         search_provider: BaseSearchProvider | None = None,
         settings: Settings | None = None,
         cache: ResearchCache | None = None,
+        session_store: SessionStore | None = None,
     ) -> None:
         self.settings = settings or get_settings()
         self.logger = get_logger("ResearchOrchestrator")
+        self.session_store = session_store or SessionStore(
+            sessions_dir=self.settings.cache_dir.parent / "sessions"
+        )
 
         # Resolve Cache layer
         if cache is not None:
@@ -125,6 +130,7 @@ class ResearchOrchestrator:
         if status_callback:
             status_callback("Planning research strategy and sub-questions...")
         await self.planner.execute(state)
+        self.session_store.save_session(state)
 
         # Multi-Iteration Deep Research Loop
         queries_to_search: list[str] = (
@@ -212,6 +218,9 @@ class ResearchOrchestrator:
 
                 queries_to_search = follow_ups
 
+            # Save iteration snapshot
+            self.session_store.save_session(state)
+
         # 6. Report Synthesis
         if status_callback:
             status_callback("Synthesizing multi-section scientific report...")
@@ -223,6 +232,7 @@ class ResearchOrchestrator:
             status_callback("Auditing citations and compiling bibliography...")
         await self.auditor.execute(state, draft_report=draft)
 
+        self.session_store.save_session(state)
         self.logger.info(
             "research_session_completed",
             session_id=state.session_id,
@@ -231,6 +241,103 @@ class ResearchOrchestrator:
             total_cost_usd=state.budget.current_cost_usd,
         )
 
+        return state
+
+    async def resume_research(
+        self,
+        session_id: str,
+        status_callback: Any = None,
+    ) -> ResearchState:
+        """Resume an incomplete or paused research session from disk."""
+        state = self.session_store.load_session(session_id)
+        if state.status == ResearchStatus.COMPLETED and state.final_report:
+            self.logger.info("resumed_completed_session", session_id=session_id)
+            return state
+
+        self.logger.info(
+            "resuming_research_session",
+            session_id=session_id,
+            iteration=state.current_iteration,
+        )
+
+        if status_callback:
+            status_callback(
+                f"Resuming session '{session_id}' from iteration {state.current_iteration + 1}..."
+            )
+
+        if not state.plan:
+            if status_callback:
+                status_callback("Planning research strategy and sub-questions...")
+            await self.planner.execute(state)
+            self.session_store.save_session(state)
+
+        queries_to_search: list[str] = (
+            state.plan.initial_search_queries if state.plan else [state.initial_query]
+        )
+        searched_queries: set[str] = set()
+
+        start_iter = max(1, state.current_iteration + 1)
+        for iteration in range(start_iter, state.max_iterations + 1):
+            state.current_iteration = iteration
+
+            current_queries = [q for q in queries_to_search if q not in searched_queries]
+            if not current_queries and iteration > 1:
+                break
+
+            for q in current_queries:
+                searched_queries.add(q)
+
+            if status_callback:
+                status_callback(
+                    f"Iteration {iteration}/{state.max_iterations}: Searching web sources..."
+                )
+            await self._discover_and_ingest_sources(
+                state, queries=current_queries, status_callback=status_callback
+            )
+
+            if status_callback:
+                status_callback(
+                    f"Iteration {iteration}/{state.max_iterations}: Evaluating source credibility..."
+                )
+            await self.evaluator.execute(state)
+
+            if status_callback:
+                status_callback(
+                    f"Iteration {iteration}/{state.max_iterations}: Extracting atomic factual evidence..."
+                )
+            await self.extractor.execute(state)
+
+            if state.max_iterations > 1:
+                if status_callback:
+                    status_callback(
+                        f"Iteration {iteration}/{state.max_iterations}: Analyzing evidence density & gaps..."
+                    )
+                await self.analyst.execute(state)
+
+                if state.budget.is_exceeded or iteration >= state.max_iterations:
+                    break
+
+                follow_ups: list[str] = []
+                if self.analyst.last_analysis:
+                    follow_ups.extend(self.analyst.last_analysis.suggested_follow_up_queries)
+                if not follow_ups:
+                    break
+                queries_to_search = follow_ups
+
+            self.session_store.save_session(state)
+
+        # Report Synthesis
+        if status_callback:
+            status_callback("Synthesizing multi-section scientific report...")
+        await self.synthesizer.execute(state)
+        draft = self.synthesizer.last_draft
+
+        # Citation Audit
+        if status_callback:
+            status_callback("Auditing citations and compiling bibliography...")
+        await self.auditor.execute(state, draft_report=draft)
+
+        self.session_store.save_session(state)
         return state
 
     async def _discover_and_ingest_sources(
@@ -290,14 +397,21 @@ class ResearchOrchestrator:
 
                     # Ingest source
                     cleaned_markdown = hit.direct_markdown or ""
+                    source_type = SourceType.UNKNOWN
 
                     if not cleaned_markdown and not self.search_provider.supports_direct_content():
-                        # Fetch web page asynchronously if search engine doesn't return markdown
+                        # Fetch web page or PDF asynchronously if search engine doesn't return markdown
                         try:
-                            raw_html = await self.web_fetcher.fetch(
+                            doc = await self.web_fetcher.fetch_document(
                                 hit.url, timeout=10.0, validate_ssrf=True
                             )
-                            cleaned_markdown = clean_html_to_markdown(raw_html, base_url=hit.url)
+                            if doc.is_pdf:
+                                cleaned_markdown = doc.content
+                                source_type = SourceType.ACADEMIC_PAPER
+                            else:
+                                cleaned_markdown = clean_html_to_markdown(
+                                    doc.content, base_url=hit.url
+                                )
                         except Exception as fetch_err:
                             self.logger.warning(
                                 "web_fetch_skipped", url=hit.url, error=str(fetch_err)
@@ -308,6 +422,7 @@ class ResearchOrchestrator:
                         url=hit.url,
                         title=hit.title,
                         snippet=hit.snippet,
+                        source_type=source_type,
                         cleaned_markdown=cleaned_markdown or hit.snippet,
                     )
                     state.add_source(source)

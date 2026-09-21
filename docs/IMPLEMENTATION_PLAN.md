@@ -1012,15 +1012,20 @@ Each milestone is designed to be completed in 1 to 3 days, contains isolated tes
 | **Milestone 10** | **Deep Research Iteration Engine**: Implement `AnalystAgent` with gap analysis, conflict detection, and dynamic follow-up query generation for multi-iteration loops. | Integration tests simulating contradictory evidence and verifying that follow-up queries are generated. | ✅ **Completed** ([`analyst.py`](../src/deep_research/agents/analyst.py)) |
 | **Milestone 11** | **Deterministic Caching Layer**: Implement SQLite / filesystem disk cache for web pages and search queries with TTL. | Tests verifying cache hit saves network calls and duplicate LLM queries. | ✅ **Completed** ([`cache.py`](../src/deep_research/storage/cache.py)) |
 | **Milestone 12** | **CI/CD, Documentation & Packaging**: GitHub Actions workflows (lint, type check, test, release), `pyproject.toml`, complete developer documentation, and contributing guides. | Clean CI run on GitHub Actions across Python 3.11 and 3.12. | ✅ **Completed** ([`.github/workflows/`](../.github/workflows/)) |
+| **Milestone 13** | **Academic PDF Document Ingestion**: Implement `PDFParser` and integrate with `WebFetcher` to extract clean structured text and metadata from scientific PDFs. | Unit tests asserting text extraction, page markers, and hyphenation repair in `test_pdf_parser.py`. | ✅ **Completed** ([`pdf_parser.py`](../src/deep_research/tools/pdf_parser.py)) |
+| **Milestone 14** | **Specialized Scientific & Web Search Providers**: Implement zero-key `ArxivSearchProvider` and privacy-focused `BraveSearchProvider`. | Unit tests for Atom XML parsing, query encoding, and HTTP error resilience in `test_arxiv_search.py` and `test_brave_search.py`. | ✅ **Completed** ([`arxiv.py`](../src/deep_research/providers/search/arxiv.py), [`brave.py`](../src/deep_research/providers/search/brave.py)) |
+| **Milestone 15** | **Session State Persistence & Checkpointing**: Implement `SessionStore` with snapshot saving to disk (`~/.deep_research/sessions/`) and resumption engine (`orchestrator.resume_research`). | Tests for state round-tripping, listing, deleting, and session resumption in `test_session_store.py` and `test_session_resume.py`. | ✅ **Completed** ([`session_store.py`](../src/deep_research/storage/session_store.py)) |
+| **Milestone 16** | **Multi-Format Export & CLI Expansion**: Add standalone styled HTML and structured JSON exports on `ResearchReport`, add `sessions` command group and `--resume` to Typer CLI. | Unit and integration tests for HTML rendering, JSON export, and CLI session commands in `test_cli.py`. | ✅ **Completed** ([`cli.py`](../src/deep_research/cli.py), [`report.py`](../src/deep_research/models/report.py)) |
 
 ---
 
 ## 21. Implementation Status & Verification
 
-All 12 milestones defined in this architectural blueprint have been fully implemented, tested, and validated:
+All 16 milestones across Phase 1 (Core Research MVP) and Phase 2 (Advanced Scientific Capabilities & Persistence) have been fully implemented, tested, and validated:
 
-- **100% Offline Test Suite**: 99 unit and integration tests passing in < 1s with 91%+ branch and statement coverage.
-- **Strict Type Safety**: 100% clean under `mypy --strict` across all 55+ source and test modules.
+- **100% Offline Test Suite**: 122 unit and integration tests passing in ~1.4s with 87%+ statement coverage.
+- **Strict Type Safety**: 100% clean under `mypy --strict` across all 65 source and test modules.
 - **Code Quality**: Zero lint or format issues under Ruff (`ruff check` and `ruff format --check`).
 - **CI/CD Automation**: Complete GitHub Actions workflow matrix testing Python 3.11 & 3.12 on both Ubuntu and macOS runners.
+
 

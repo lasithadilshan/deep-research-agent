@@ -39,3 +39,7 @@ class WebFetchError(DeepResearchError):
 
 class CitationVerificationError(DeepResearchError):
     """Raised when citation or evidence grounding audit fails."""
+
+
+class SessionNotFoundError(DeepResearchError):
+    """Raised when a research session cannot be found or loaded from disk."""

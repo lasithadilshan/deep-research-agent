@@ -22,8 +22,23 @@ def register_search_provider(
     return decorator
 
 
+def _ensure_builtins() -> None:
+    """Ensure all default built-in providers are imported and registered."""
+    if "arxiv" not in _SEARCH_PROVIDER_REGISTRY:
+        import deep_research.providers.search.arxiv  # noqa: F401
+    if "brave" not in _SEARCH_PROVIDER_REGISTRY:
+        import deep_research.providers.search.brave  # noqa: F401
+    if "duckduckgo" not in _SEARCH_PROVIDER_REGISTRY:
+        import deep_research.providers.search.duckduckgo  # noqa: F401
+    if "tavily" not in _SEARCH_PROVIDER_REGISTRY:
+        import deep_research.providers.search.tavily  # noqa: F401
+    if "mock" not in _SEARCH_PROVIDER_REGISTRY:
+        import deep_research.providers.search.mock  # noqa: F401
+
+
 def get_search_provider(name: str, **kwargs: Any) -> BaseSearchProvider:
     """Instantiate a registered search provider by name."""
+    _ensure_builtins()
     key = name.strip().lower()
     if key not in _SEARCH_PROVIDER_REGISTRY:
         available = ", ".join(sorted(_SEARCH_PROVIDER_REGISTRY.keys()))
@@ -36,4 +51,5 @@ def get_search_provider(name: str, **kwargs: Any) -> BaseSearchProvider:
 
 def list_search_providers() -> list[str]:
     """Return list of all registered search provider keys."""
+    _ensure_builtins()
     return sorted(_SEARCH_PROVIDER_REGISTRY.keys())

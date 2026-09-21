@@ -45,16 +45,21 @@ graph TD
 
 ### 2. Dual Provider Abstraction Layers
 - **LLM Layer**: Clean `BaseLLMProvider` interface with a registry `@register_llm_provider`. Ships with native **Google Gemini 3.8 Flash** (`gemini-3.8-flash`) structured decoding, and deterministic `MockLLMProvider` for offline testing.
-- **Search Layer**: Extensible `BaseSearchProvider` supporting **Tavily AI Search** (with direct markdown), **DuckDuckGo** (zero-config fallback), and deterministic `MockSearchProvider`.
+- **Search Layer**: Extensible `BaseSearchProvider` supporting **Tavily AI Search** (with direct markdown), **ArXiv Search API** (zero-key scientific preprint discovery), **Brave Search**, **DuckDuckGo** (zero-config fallback), and deterministic `MockSearchProvider`.
 
 ### 3. Multi-Turn Deep Iteration Engine
 - **`AnalystAgent`**: Computes empirical evidence density across sub-questions, detects factual contradictions between sources, and formulates targeted follow-up search queries to resolve knowledge gaps across iterations.
 - **Iterative Loop**: Runs in `QUICK` (1 turn), `STANDARD` (2 turns), or `DEEP` (up to 10 turns with early satisfaction termination).
 
-### 4. Deterministic Caching & Web Sanitization
+### 4. Deterministic Caching, Web Sanitization & PDF Parsing
 - **SQLite Disk Cache**: Transparent WAL-mode disk cache with configurable TTL (default 72h) for search queries and scraped web pages. Keyed by SHA-256 digests.
+- **Academic PDF Parser**: Ingests scientific whitepapers and ArXiv preprints directly from `.pdf` URLs via `pypdf`, extracting page-by-page text, normalizing hyphenated breaks, and extracting document metadata.
 - **SSRF Defense**: `WebFetcher` validates DNS resolutions against loopback, private, AWS metadata (`169.254.169.254`), and link-local ranges.
 - **Boilerplate Stripper**: `trafilatura` extracts clean semantic article text, stripping headers, footers, ads, and navigation menus, cutting token usage by ~85%.
+
+### 5. Session State Persistence & Multi-Format Exports
+- **Session Checkpointing**: Automatic snapshot saving to `~/.deep_research/sessions/`, enabling full session resumption (`--resume <session_id>`).
+- **Multi-Format Export**: Generates styled standalone **HTML** reports (with responsive dark mode and clickable reference anchors), structured **JSON**, or clean **Markdown**.
 
 ---
 
@@ -118,6 +123,18 @@ deep-research run "Solid-state battery commercial readiness and manufacturing bo
   --mode deep \
   --output ./battery_report.md \
   --budget 0.50
+
+# Academic preprint search on ArXiv (zero API key needed)
+deep-research run "Fault-tolerant surface codes" --search arxiv --mode quick
+
+# Export research report directly to standalone HTML
+deep-research run "Perovskite solar cell degradation" --format html --output ./report.html
+
+# Inspect, list, or resume saved research sessions
+deep-research sessions list
+deep-research sessions show ses-1234abcd
+deep-research sessions export ses-1234abcd --format html -o ./exported.html
+deep-research run --resume ses-1234abcd
 ```
 
 > **Note**: Both `deep-research run "query"` and `deep-research "query"` are fully supported.

@@ -15,18 +15,25 @@ from deep_research.core.orchestrator import ResearchOrchestrator
 from deep_research.models.plan import ResearchMode
 from deep_research.providers.llm.factory import get_llm_provider
 from deep_research.providers.search.factory import get_search_provider
+from deep_research.storage.session_store import SessionStore
 
 app = typer.Typer(
     name="deep-research",
     help="Autonomous scientific research agent powered by Google Gemini 3.8 Flash",
     no_args_is_help=True,
 )
+sessions_app = typer.Typer(
+    name="sessions",
+    help="Inspect, list, and export saved research sessions",
+    no_args_is_help=True,
+)
+app.add_typer(sessions_app, name="sessions")
 console = Console()
 
 
-@app.command()
-def main(
-    query: str = typer.Argument(..., help="Research question or topic to investigate"),
+@app.command("run")
+def run_command(
+    query: str = typer.Argument("", help="Research question or topic to investigate"),
     mode: str = typer.Option(
         "standard",
         "--mode",
@@ -42,7 +49,7 @@ def main(
         None,
         "--search",
         "-s",
-        help="Search provider override: 'tavily', 'duckduckgo', 'mock'",
+        help="Search provider override: 'tavily', 'duckduckgo', 'arxiv', 'brave', 'mock'",
     ),
     budget: float | None = typer.Option(
         None,
@@ -54,7 +61,18 @@ def main(
         None,
         "--output",
         "-o",
-        help="File path to save the generated markdown research report",
+        help="File path to save the generated research report",
+    ),
+    report_format: str = typer.Option(
+        "markdown",
+        "--format",
+        "-f",
+        help="Output format: 'markdown', 'html', or 'json'",
+    ),
+    resume: str | None = typer.Option(
+        None,
+        "--resume",
+        help="Resume an existing research session by ID (e.g. ses-1234abcd)",
     ),
     quiet: bool = typer.Option(
         False,
@@ -67,6 +85,12 @@ def main(
     settings = get_settings()
     configure_logging(level="ERROR" if quiet else settings.log_level, structured=False)
 
+    if not query and not resume:
+        console.print(
+            "[bold red]Error:[/] Please provide a research query or use --resume <session_id>."
+        )
+        raise typer.Exit(code=1)
+
     try:
         research_mode = ResearchMode(mode.lower())
     except ValueError:
@@ -78,7 +102,7 @@ def main(
     console.print(
         Panel(
             f"[bold cyan]Deep Research Agent[/]\n"
-            f"[dim]Topic:[/] {query}\n"
+            f"[dim]Topic:[/] {query or f'Resuming {resume}'}\n"
             f"[dim]Mode:[/] {research_mode.value.upper()} | "
             f"[dim]Budget Ceiling:[/] ${budget or settings.max_budget_usd_per_run:.2f}",
             border_style="cyan",
@@ -95,28 +119,49 @@ def main(
         settings=settings,
     )
 
-    with console.status("[bold green]Starting deep research inquiry...", spinner="dots") as status:
+    with console.status("[bold green]Executing research inquiry...", spinner="dots") as status:
 
         def update_status(message: str) -> None:
             status.update(f"[bold green]{message}")
 
-        state = asyncio.run(
-            orchestrator.execute_research(
-                query=query,
-                mode=research_mode,
-                max_budget_usd=budget,
-                status_callback=update_status,
+        if resume:
+            state = asyncio.run(
+                orchestrator.resume_research(
+                    session_id=resume,
+                    status_callback=update_status,
+                )
             )
-        )
+        else:
+            state = asyncio.run(
+                orchestrator.execute_research(
+                    query=query,
+                    mode=research_mode,
+                    max_budget_usd=budget,
+                    status_callback=update_status,
+                )
+            )
 
     if not state.final_report:
         console.print("[bold red]Research pipeline completed without producing a final report.[/]")
         raise typer.Exit(code=1)
 
-    # Render Report
-    report_md = state.final_report.to_markdown()
+    # Format report
+    fmt = report_format.lower().strip()
+    if fmt == "html":
+        report_content = state.final_report.to_html()
+    elif fmt == "json":
+        report_content = state.final_report.to_json()
+    else:
+        report_content = state.final_report.to_markdown()
+
+    # Render to console
     console.print()
-    console.print(Markdown(report_md))
+    if fmt == "markdown":
+        console.print(Markdown(report_content))
+    elif fmt == "json":
+        console.print(f"[dim]Structured JSON report ({len(report_content)} bytes generated)[/]")
+    elif fmt == "html":
+        console.print(f"[dim]Standalone HTML report ({len(report_content)} bytes generated)[/]")
 
     # Render Telemetry / Statistics Table
     console.print()
@@ -138,16 +183,127 @@ def main(
     # Save to file if output specified
     if output:
         output.parent.mkdir(parents=True, exist_ok=True)
-        output.write_text(report_md, encoding="utf-8")
-        console.print(f"\n[bold green]Report successfully written to:[/] {output}")
+        output.write_text(report_content, encoding="utf-8")
+        console.print(f"\n[bold green]Report ({fmt.upper()}) successfully written to:[/] {output}")
+
+
+@sessions_app.command("list")
+def list_sessions_cmd(
+    limit: int = typer.Option(20, "--limit", "-n", help="Maximum sessions to display"),
+) -> None:
+    """List all saved research sessions."""
+    store = SessionStore()
+    sessions = store.list_sessions(limit=limit)
+    if not sessions:
+        console.print("[dim]No saved research sessions found.[/]")
+        return
+
+    table = Table(title="Saved Research Sessions", border_style="cyan")
+    table.add_column("Session ID", style="bold cyan")
+    table.add_column("Query", style="white", max_width=40, overflow="ellipsis")
+    table.add_column("Mode", style="yellow")
+    table.add_column("Status", style="green")
+    table.add_column("Sources", justify="right")
+    table.add_column("Evidence", justify="right")
+    table.add_column("Cost", justify="right")
+    table.add_column("Saved At", style="dim")
+
+    for s in sessions:
+        table.add_row(
+            s.session_id,
+            s.initial_query,
+            s.mode.value.upper(),
+            s.status.value,
+            str(s.sources_count),
+            str(s.evidence_count),
+            f"${s.cost_usd:.4f}",
+            s.saved_at.strftime("%Y-%m-%d %H:%M"),
+        )
+    console.print(table)
+
+
+@sessions_app.command("show")
+def show_session_cmd(
+    session_id: str = typer.Argument(..., help="Session ID (e.g. ses-1234abcd)"),
+) -> None:
+    """Display details and report for a saved session."""
+    store = SessionStore()
+    try:
+        state = store.load_session(session_id)
+    except Exception as e:
+        console.print(f"[bold red]Error:[/] {e}")
+        raise typer.Exit(code=1) from None
+
+    console.print(
+        Panel(
+            f"[bold cyan]Research Session: {state.session_id}[/]\n"
+            f"[dim]Topic:[/] {state.initial_query}\n"
+            f"[dim]Status:[/] {state.status.value.upper()} | "
+            f"[dim]Mode:[/] {state.mode.value.upper()} | "
+            f"[dim]Cost:[/] ${state.budget.current_cost_usd:.4f}",
+            border_style="cyan",
+        )
+    )
+
+    if state.final_report:
+        console.print(Markdown(state.final_report.to_markdown()))
+    else:
+        console.print("[yellow]Session has not generated a final report.[/]")
+
+
+@sessions_app.command("export")
+def export_session_cmd(
+    session_id: str = typer.Argument(..., help="Session ID (e.g. ses-1234abcd)"),
+    output: Path = typer.Option(..., "--output", "-o", help="Destination file path"),
+    report_format: str = typer.Option(
+        "markdown", "--format", "-f", help="Format: 'markdown', 'html', or 'json'"
+    ),
+) -> None:
+    """Export a session report to Markdown, HTML, or JSON."""
+    store = SessionStore()
+    try:
+        content = store.export_report(session_id, format_type=report_format)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8")
+        console.print(f"[bold green]Session report successfully exported to:[/] {output}")
+    except Exception as e:
+        console.print(f"[bold red]Export error:[/] {e}")
+        raise typer.Exit(code=1) from None
+
+
+@sessions_app.command("delete")
+def delete_session_cmd(
+    session_id: str = typer.Argument(..., help="Session ID to delete"),
+) -> None:
+    """Delete a saved research session."""
+    store = SessionStore()
+    if store.delete_session(session_id):
+        console.print(f"[green]Session '{session_id}' deleted successfully.[/]")
+    else:
+        console.print(f"[yellow]Session '{session_id}' was not found.[/]")
 
 
 def run_cli() -> None:
     """CLI entry point supporting both 'deep-research query' and 'deep-research run query'."""
     import sys
 
-    if len(sys.argv) > 1 and sys.argv[1] == "run":
-        sys.argv.pop(1)
+    known_subcommands = {
+        "run",
+        "sessions",
+        "--help",
+        "-h",
+        "--install-completion",
+        "--show-completion",
+    }
+
+    # If user executes 'deep-research "query" ...' without 'run' keyword, auto-insert 'run'
+    if (
+        len(sys.argv) > 1
+        and sys.argv[1] not in known_subcommands
+        and not sys.argv[1].startswith("-")
+    ):
+        sys.argv.insert(1, "run")
+
     app()
 
 

@@ -1,6 +1,8 @@
 """Search provider exports."""
 
+from deep_research.providers.search.arxiv import ArxivSearchProvider
 from deep_research.providers.search.base import BaseSearchProvider
+from deep_research.providers.search.brave import BraveSearchProvider
 from deep_research.providers.search.duckduckgo import DuckDuckGoProvider
 from deep_research.providers.search.factory import (
     get_search_provider,
@@ -11,7 +13,9 @@ from deep_research.providers.search.mock import MockSearchProvider
 from deep_research.providers.search.tavily import TavilyProvider
 
 __all__ = [
+    "ArxivSearchProvider",
     "BaseSearchProvider",
+    "BraveSearchProvider",
     "DuckDuckGoProvider",
     "MockSearchProvider",
     "TavilyProvider",
