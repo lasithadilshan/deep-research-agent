@@ -81,3 +81,47 @@ def test_cli_mock_run_html_format(tmp_path: Path) -> None:
 def test_cli_sessions_list() -> None:
     result = runner.invoke(app, ["sessions", "list"])
     assert result.exit_code == 0
+
+
+def test_cli_interactive_approve(tmp_path: Path) -> None:
+    out_file = tmp_path / "interactive_report.md"
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "Next-gen nuclear fission",
+            "--mode",
+            "quick",
+            "--llm",
+            "mock",
+            "--search",
+            "mock",
+            "--output",
+            str(out_file),
+            "--interactive",
+        ],
+        input="a\n",
+    )
+    assert result.exit_code == 0
+    assert out_file.exists()
+    assert "Plan approved" in result.output or "Synthesized Investigation Report" in result.output
+
+
+def test_cli_interactive_cancel() -> None:
+    result = runner.invoke(
+        app,
+        [
+            "run",
+            "Next-gen nuclear fission",
+            "--mode",
+            "quick",
+            "--llm",
+            "mock",
+            "--search",
+            "mock",
+            "-i",
+        ],
+        input="c\n",
+    )
+    assert result.exit_code == 0
+    assert "cancelled" in result.output.lower()

@@ -57,9 +57,14 @@ graph TD
 - **SSRF Defense**: `WebFetcher` validates DNS resolutions against loopback, private, AWS metadata (`169.254.169.254`), and link-local ranges.
 - **Boilerplate Stripper**: `trafilatura` extracts clean semantic article text, stripping headers, footers, ads, and navigation menus, cutting token usage by ~85%.
 
-### 5. Session State Persistence & Multi-Format Exports
-- **Session Checkpointing**: Automatic snapshot saving to `~/.deep_research/sessions/`, enabling full session resumption (`--resume <session_id>`).
+### 5. Session Checkpointing, Resumption & Multi-Format Exports
+- **Atomic State Persistence**: Incomplete and complete sessions are automatically checkpointed to disk (`~/.deep_research/sessions/`), tracking all sources, extracted evidence, budget expenditures, and findings.
+- **Resumption & CLI Management**: Resume interrupted or paused sessions using `--resume <session_id>`, or inspect, export, and delete past sessions via `deep-research sessions [list|show|export|delete]`.
 - **Multi-Format Export**: Generates styled standalone **HTML** reports (with responsive dark mode and clickable reference anchors), structured **JSON**, or clean **Markdown**.
+
+### 6. Human-in-the-Loop Plan Review & Steering
+- **Interactive Terminal Gate**: Launch research with `--interactive` / `-i` to pause and inspect the research hypotheses, sub-questions, and initial search queries before any web searches or token expenditures occur.
+- **Dynamic Plan Refinement**: Add new sub-questions, prune unwanted inquiry lines, edit seed search queries, or cleanly cancel the research run before execution.
 
 ---
 
@@ -126,6 +131,9 @@ deep-research run "Solid-state battery commercial readiness and manufacturing bo
 
 # Academic preprint search on ArXiv (zero API key needed)
 deep-research run "Fault-tolerant surface codes" --search arxiv --mode quick
+
+# Human-in-the-loop interactive plan review before executing searches
+deep-research run "Commercial fusion energy roadmaps" --interactive
 
 # Export research report directly to standalone HTML
 deep-research run "Perovskite solar cell degradation" --format html --output ./report.html

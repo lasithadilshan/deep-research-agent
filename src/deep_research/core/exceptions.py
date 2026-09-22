@@ -43,3 +43,7 @@ class CitationVerificationError(DeepResearchError):
 
 class SessionNotFoundError(DeepResearchError):
     """Raised when a research session cannot be found or loaded from disk."""
+
+
+class ResearchCancelledError(DeepResearchError):
+    """Raised when research inquiry is cancelled by user during plan review."""

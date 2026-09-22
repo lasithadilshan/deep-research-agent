@@ -11,8 +11,10 @@ from rich.table import Table
 
 from deep_research.config.logging import configure_logging
 from deep_research.config.settings import get_settings
+from deep_research.core.exceptions import ResearchCancelledError
+from deep_research.core.interactive import review_plan_interactively
 from deep_research.core.orchestrator import ResearchOrchestrator
-from deep_research.models.plan import ResearchMode
+from deep_research.models.plan import ResearchMode, ResearchPlan
 from deep_research.providers.llm.factory import get_llm_provider
 from deep_research.providers.search.factory import get_search_provider
 from deep_research.storage.session_store import SessionStore
@@ -74,6 +76,12 @@ def run_command(
         "--resume",
         help="Resume an existing research session by ID (e.g. ses-1234abcd)",
     ),
+    interactive: bool = typer.Option(
+        False,
+        "--interactive",
+        "-i",
+        help="Review and edit the research plan interactively before executing searches",
+    ),
     quiet: bool = typer.Option(
         False,
         "--quiet",
@@ -119,27 +127,42 @@ def run_command(
         settings=settings,
     )
 
-    with console.status("[bold green]Executing research inquiry...", spinner="dots") as status:
+    try:
+        with console.status("[bold green]Executing research inquiry...", spinner="dots") as status:
 
-        def update_status(message: str) -> None:
-            status.update(f"[bold green]{message}")
+            def update_status(message: str) -> None:
+                status.update(f"[bold green]{message}")
 
-        if resume:
-            state = asyncio.run(
-                orchestrator.resume_research(
-                    session_id=resume,
-                    status_callback=update_status,
+            def plan_approver_cb(plan: ResearchPlan) -> ResearchPlan | None:
+                status.stop()
+                try:
+                    return review_plan_interactively(plan, console=console)
+                finally:
+                    status.start()
+
+            approver = plan_approver_cb if interactive else None
+
+            if resume:
+                state = asyncio.run(
+                    orchestrator.resume_research(
+                        session_id=resume,
+                        status_callback=update_status,
+                        plan_approver=approver,
+                    )
                 )
-            )
-        else:
-            state = asyncio.run(
-                orchestrator.execute_research(
-                    query=query,
-                    mode=research_mode,
-                    max_budget_usd=budget,
-                    status_callback=update_status,
+            else:
+                state = asyncio.run(
+                    orchestrator.execute_research(
+                        query=query,
+                        mode=research_mode,
+                        max_budget_usd=budget,
+                        status_callback=update_status,
+                        plan_approver=approver,
+                    )
                 )
-            )
+    except ResearchCancelledError:
+        console.print("[yellow]Research run cancelled by user during plan review.[/]")
+        raise typer.Exit(code=0) from None
 
     if not state.final_report:
         console.print("[bold red]Research pipeline completed without producing a final report.[/]")

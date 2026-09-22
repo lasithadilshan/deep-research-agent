@@ -25,6 +25,7 @@ class ResearchStatus(StrEnum):
     AUDITING = "auditing"
     COMPLETED = "completed"
     FAILED = "failed"
+    CANCELLED = "cancelled"
 
 
 class Finding(BaseModel):

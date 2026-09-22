@@ -1016,15 +1016,16 @@ Each milestone is designed to be completed in 1 to 3 days, contains isolated tes
 | **Milestone 14** | **Specialized Scientific & Web Search Providers**: Implement zero-key `ArxivSearchProvider` and privacy-focused `BraveSearchProvider`. | Unit tests for Atom XML parsing, query encoding, and HTTP error resilience in `test_arxiv_search.py` and `test_brave_search.py`. | ✅ **Completed** ([`arxiv.py`](../src/deep_research/providers/search/arxiv.py), [`brave.py`](../src/deep_research/providers/search/brave.py)) |
 | **Milestone 15** | **Session State Persistence & Checkpointing**: Implement `SessionStore` with snapshot saving to disk (`~/.deep_research/sessions/`) and resumption engine (`orchestrator.resume_research`). | Tests for state round-tripping, listing, deleting, and session resumption in `test_session_store.py` and `test_session_resume.py`. | ✅ **Completed** ([`session_store.py`](../src/deep_research/storage/session_store.py)) |
 | **Milestone 16** | **Multi-Format Export & CLI Expansion**: Add standalone styled HTML and structured JSON exports on `ResearchReport`, add `sessions` command group and `--resume` to Typer CLI. | Unit and integration tests for HTML rendering, JSON export, and CLI session commands in `test_cli.py`. | ✅ **Completed** ([`cli.py`](../src/deep_research/cli.py), [`report.py`](../src/deep_research/models/report.py)) |
+| **Milestone 17** | **Human-in-the-Loop CLI Plan Approval & Steering**: Implement `review_plan_interactively` allowing terminal users to review, add/remove sub-questions, edit search queries, and approve/cancel research plans before web execution. | Unit tests for plan editing/approval/cancellation in `test_interactive.py`, orchestrator hook in `test_orchestrator_interactive.py`, and CLI tests in `test_cli.py`. | ✅ **Completed** ([`interactive.py`](../src/deep_research/core/interactive.py), [`orchestrator.py`](../src/deep_research/core/orchestrator.py), [`cli.py`](../src/deep_research/cli.py)) |
 
 ---
 
 ## 21. Implementation Status & Verification
 
-All 16 milestones across Phase 1 (Core Research MVP) and Phase 2 (Advanced Scientific Capabilities & Persistence) have been fully implemented, tested, and validated:
+All 17 milestones across Phase 1 (Core Research MVP), Phase 2 (Advanced Scientific Capabilities & Persistence), and Phase 3 (Human-in-the-Loop Collaboration) have been fully implemented, tested, and validated:
 
-- **100% Offline Test Suite**: 122 unit and integration tests passing in ~1.4s with 87%+ statement coverage.
-- **Strict Type Safety**: 100% clean under `mypy --strict` across all 65 source and test modules.
+- **100% Offline Test Suite**: 132 unit and integration tests passing with 88%+ statement coverage.
+- **Strict Type Safety**: 100% clean under `mypy --strict` across all 68 source and test modules.
 - **Code Quality**: Zero lint or format issues under Ruff (`ruff check` and `ruff format --check`).
 - **CI/CD Automation**: Complete GitHub Actions workflow matrix testing Python 3.11 & 3.12 on both Ubuntu and macOS runners.
 

@@ -1,5 +1,5 @@
-"""Central workflow orchestrator coordinating multi-agent research pipelines."""
-
+import inspect
+from collections.abc import Awaitable, Callable
 from typing import Any
 
 from deep_research.agents.analyst import AnalystAgent
@@ -10,9 +10,9 @@ from deep_research.agents.planner import PlannerAgent
 from deep_research.agents.synthesizer import SynthesizerAgent
 from deep_research.config.logging import get_logger
 from deep_research.config.settings import Settings, get_settings
-from deep_research.core.exceptions import ConfigurationError
+from deep_research.core.exceptions import ConfigurationError, ResearchCancelledError
 from deep_research.models.cost import BudgetTracker
-from deep_research.models.plan import ResearchMode
+from deep_research.models.plan import ResearchMode, ResearchPlan
 from deep_research.models.search import SearchResponse
 from deep_research.models.source import Source, SourceType, canonicalize_url, generate_source_id
 from deep_research.models.state import ResearchState, ResearchStatus
@@ -24,6 +24,8 @@ from deep_research.storage.cache import ResearchCache
 from deep_research.storage.session_store import SessionStore
 from deep_research.tools.content_cleaner import clean_html_to_markdown
 from deep_research.tools.web_fetcher import WebFetcher
+
+PlanApprover = Callable[[ResearchPlan], Awaitable[ResearchPlan | None] | ResearchPlan | None]
 
 
 class ResearchOrchestrator:
@@ -100,6 +102,7 @@ class ResearchOrchestrator:
         mode: ResearchMode | None = None,
         max_budget_usd: float | None = None,
         status_callback: Any = None,
+        plan_approver: PlanApprover | None = None,
     ) -> ResearchState:
         """Run the end-to-end research loop from query to cited report."""
         active_mode = mode or self.settings.default_research_mode
@@ -131,6 +134,24 @@ class ResearchOrchestrator:
             status_callback("Planning research strategy and sub-questions...")
         await self.planner.execute(state)
         self.session_store.save_session(state)
+
+        # Optional Human-in-the-Loop Plan Review & Approval
+        if plan_approver and state.plan:
+            if status_callback:
+                status_callback("Awaiting human review and approval of research plan...")
+            res = plan_approver(state.plan)
+            approved_plan = await res if inspect.isawaitable(res) else res
+
+            if approved_plan is None:
+                state.transition_to(
+                    ResearchStatus.CANCELLED, "Research cancelled by user during plan review"
+                )
+                self.session_store.save_session(state)
+                raise ResearchCancelledError("Research cancelled by user during plan review.")
+
+            state.plan = approved_plan
+            state.record_audit("Plan modified and approved by human reviewer")
+            self.session_store.save_session(state)
 
         # Multi-Iteration Deep Research Loop
         queries_to_search: list[str] = (
@@ -247,6 +268,7 @@ class ResearchOrchestrator:
         self,
         session_id: str,
         status_callback: Any = None,
+        plan_approver: PlanApprover | None = None,
     ) -> ResearchState:
         """Resume an incomplete or paused research session from disk."""
         state = self.session_store.load_session(session_id)
@@ -270,6 +292,23 @@ class ResearchOrchestrator:
                 status_callback("Planning research strategy and sub-questions...")
             await self.planner.execute(state)
             self.session_store.save_session(state)
+
+            if plan_approver and state.plan:
+                if status_callback:
+                    status_callback("Awaiting human review and approval of research plan...")
+                res = plan_approver(state.plan)
+                approved_plan = await res if inspect.isawaitable(res) else res
+
+                if approved_plan is None:
+                    state.transition_to(
+                        ResearchStatus.CANCELLED, "Research cancelled by user during plan review"
+                    )
+                    self.session_store.save_session(state)
+                    raise ResearchCancelledError("Research cancelled by user during plan review.")
+
+                state.plan = approved_plan
+                state.record_audit("Plan modified and approved by human reviewer")
+                self.session_store.save_session(state)
 
         queries_to_search: list[str] = (
             state.plan.initial_search_queries if state.plan else [state.initial_query]

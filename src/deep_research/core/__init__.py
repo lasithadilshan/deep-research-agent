@@ -9,9 +9,12 @@ from deep_research.core.exceptions import (
     LLMContextLengthExceededError,
     LLMProviderError,
     LLMRateLimitError,
+    ResearchCancelledError,
     SearchProviderError,
+    SessionNotFoundError,
     WebFetchError,
 )
+from deep_research.core.interactive import review_plan_interactively
 
 __all__ = [
     "BudgetExceededError",
@@ -22,6 +25,9 @@ __all__ = [
     "LLMContextLengthExceededError",
     "LLMProviderError",
     "LLMRateLimitError",
+    "ResearchCancelledError",
     "SearchProviderError",
+    "SessionNotFoundError",
     "WebFetchError",
+    "review_plan_interactively",
 ]
